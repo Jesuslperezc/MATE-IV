@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulador de Crecimiento Poblacional — Modelo Logístico</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    :root { --bg:#0f1724; --card:#0b1220; --accent:#7dd3fc; --muted:#94a3b8; --radius:12px; --gap:14px; }
+    * { box-sizing:border-box; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial; }
+    html,body { height:100%; margin:0; background: linear-gradient(180deg,#071021 0%,#071827 100%); color:#e6eef8; }
+    .container{ max-width:1100px; margin:28px auto; padding:20px; }
+    header{ display:flex; gap:16px; align-items:center; margin-bottom:18px; }
+    h1{ margin:0; font-size:20px; }
+    p.lead{ margin:0; color:var(--muted); font-size:13px; }
+    .layout{ display:grid; grid-template-columns:360px 1fr; gap:var(--gap); align-items:start; }
+    .card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.03); padding:16px; border-radius:var(--radius); box-shadow:0 6px 18px rgba(2,6,23,0.6); }
+    .controls{ display:flex; flex-direction:column; gap:12px; }
+    .control-row{ display:flex; gap:8px; align-items:center; }
+    label{ font-size:13px; color:var(--muted); min-width:90px; }
+    input[type="number"]{ background:transparent; border:1px solid rgba(255,255,255,0.04); color:inherit; padding:8px; border-radius:8px; width:120px; }
+    .small{ font-size:12px; color:var(--muted); }
+    button{ background: linear-gradient(90deg,var(--accent),#60a5fa); border:none; color:#022029; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600; box-shadow:0 6px 18px rgba(93,173,212,0.12); }
+    button.ghost{ background:transparent; border:1px solid rgba(255,255,255,0.04); color:var(--muted); font-weight:500; }
+    #chart{ height:520px; }
+    .status{ margin-top:12px; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.02); }
+    .status p{ margin:6px 0; font-size:14px; }
+    .badge{ display:inline-block; padding:6px 8px; border-radius:8px; background:rgba(255,255,255,0.03); color:var(--muted); font-size:12px; }
+    footer{ margin-top:16px; color:var(--muted); font-size:13px; text-align:center; }
+    @media(max-width:920px){ .layout{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>🌱 Simulador: Crecimiento Poblacional (Logístico)</h1>
+        <p class="lead">Modelo: dP/dt = r P (1 - P/K). Visualiza P(t), umbrales y mensajes dinámicos.</p>
+      </div>
+    </header>
+
+    <div class="layout">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <strong>Parámetros</strong>
+          <div class="small">Tiempo resuelto: <span id="pts">200</span> puntos</div>
+        </div>
+
+        <div class="controls">
+          <div class="control-row">
+            <label for="r">r (tasa)</label>
+            <input id="r" type="number" min="0.001" step="0.01" value="0.2">
+            <span class="small">por unidad de tiempo (años)</span>
+          </div>
+          <div class="control-row">
+            <label for="K">K (capacidad)</label>
+            <input id="K" type="number" min="1" step="10" value="1000">
+            <span class="small">individuos</span>
+          </div>
+          <div class="control-row">
+            <label for="P0">P₀ (inicial)</label>
+            <input id="P0" type="number" min="1" step="1" value="50">
+          </div>
+          <div class="control-row">
+            <label for="tmax">t max</label>
+            <input id="tmax" type="number" min="5" max="1000" step="1" value="50">
+            <span class="small">unidad de tiempo (años) </span>
+          </div>
+          <div class="control-row">
+            <label for="points">Puntos</label>
+            <input id="points" type="number" min="50" max="2000" step="10" value="200">
+            <button id="update">Actualizar gráfico</button>
+          </div>
+
+          <div style="display:flex;gap:8px; margin-top:6px;">
+            <button id="exportCsv" class="ghost">Exportar CSV</button>
+            <button id="reset">Restablecer</button>
+          </div>
+
+          <div class="status" id="statusBox" aria-live="polite">
+            <p><span class="badge">Estado:</span> <span id="statusText">— Ajusta parámetros y haz click en "Actualizar gráfico".</span></p>
+            <p class="small" id="crossInfo"></p>
+            <p class="small" id="growthInfo"></p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" id="chartCard" style="padding:12px;">
+          <div id="chart"></div>
+        </div>
+        <footer>
+          Hecho por el grupo de Ruben Adarme, Victor Aguillon, Rosavirginia Lujan, Andres Pereira y Jesus Perez.
+        </footer>
+      </div>
+    </div>
+  </div>
+
+<script>
+const el = id => document.getElementById(id);
+const rInput = el('r'), KInput = el('K'), P0Input = el('P0'), tmaxInput = el('tmax'), pointsInput = el('points');
+const updateBtn = el('update'), resetBtn = el('reset'), exportBtn = el('exportCsv');
+const statusText = el('statusText'), crossInfo = el('crossInfo'), growthInfo = el('growthInfo'), ptsEl = el('pts');
+
+function linspace(a,b,n){
+  const out=[];
+  if(n<=1){ out.push(a); return out; }
+  const step=(b-a)/(n-1);
+  for(let i=0;i<n;i++) out.push(a + step*i);
+  return out;
+}
+
+function computeLogistic(r,K,P0,tArr){
+  if(P0<=0) P0=1;
+  if(K<=0) K=1;
+  const A=(K-P0)/P0;
+  const P=tArr.map(t => K/(1 + A*Math.exp(-r*t)));
+  return {A,P};
+}
+
+function findFirstCrossing(tArr,P,thresh){
+  for(let i=0;i<P.length;i++){ if(P[i]>=thresh) return {t:tArr[i],index:i,value:P[i]}; }
+  return null;
+}
+
+function porcentajeCrecimiento(P0,Pf){
+  return ((Pf-P0)/P0)*100;
+}
+
+function prettyNum(x){
+  if(x>=1e6) return (x/1e6).toFixed(2)+'M';
+  if(x>=1000) return Math.round(x).toLocaleString();
+  return x.toFixed(2);
+}
+
+function updateChart(){
+  const r=parseFloat(rInput.value), K=parseFloat(KInput.value), P0=parseFloat(P0Input.value),
+        tmax=parseFloat(tmaxInput.value), nPoints=parseInt(pointsInput.value);
+
+  ptsEl.textContent=nPoints;
+  if(isNaN(r)||isNaN(K)||isNaN(P0)||isNaN(tmax)||isNaN(nPoints)||r<=0||K<=0||P0<=0||tmax<=0||nPoints<2){
+    statusText.textContent='⚠️ Por favor, ingresa valores válidos para todos los parámetros.';
+    return;
+  }
+
+  const tArr=linspace(0,tmax,nPoints);
+  const {P}=computeLogistic(r,K,P0,tArr);
+  const Pf=P[P.length-1];
+  const porcentaje=porcentajeCrecimiento(P0,Pf);
+  growthInfo.textContent=`📈 Crecimiento poblacional: ${porcentaje.toFixed(2)}%`;
+
+  // Mensaje según estabilidad
+  const ratio=Pf/K;
+  if(ratio<0.5) statusText.textContent='🟡 La población aún está lejos de la capacidad de carga.';
+  else if(ratio<0.9) statusText.textContent='🟢 La población superó el 50% de la capacidad de carga.';
+  else if(ratio<0.99) statusText.textContent='🔵 ¡Tu población alcanzó el 90% de la capacidad de carga!';
+  else statusText.textContent='⚫ La población se ha estabilizado cerca de la capacidad de carga.';
+
+  // Cruces 50% y 90%
+  const cross50=findFirstCrossing(tArr,P,0.5*K), cross90=findFirstCrossing(tArr,P,0.9*K);
+  crossInfo.textContent=`• 50% de K: ${cross50 ? 't≈'+cross50.t.toFixed(2)+' (P≈'+prettyNum(cross50.value)+')':'no alcanzado'} • 90% de K: ${cross90 ? 't≈'+cross90.t.toFixed(2)+' (P≈'+prettyNum(cross90.value)+')':'no alcanzado'}`;
+
+  // Gráfico
+  const data=[{x:tArr, y:P, mode:'lines', name:'P(t)', line:{color:'#7dd3fc',width:3}},
+              {x:[0,tArr[tArr.length-1]], y:[K,K], mode:'lines', name:'K', line:{dash:'dash',color:'#ff6b6b',width:2}}];
+  const layout={title:'Crecimiento Poblacional (Modelo Logístico)',
+                xaxis:{title:'Tiempo (t)',gridcolor:'rgba(255,255,255,0.05)'},
+                yaxis:{title:'Población (P)',gridcolor:'rgba(255,255,255,0.05)'},
+                plot_bgcolor:'rgba(0,0,0,0)',paper_bgcolor:'rgba(0,0,0,0)',font:{color:'#e6eef8'}};
+  Plotly.newPlot('chart',data,layout,{responsive:true});
+}
+
+// Eventos
+updateBtn.addEventListener('click',updateChart);
+resetBtn.addEventListener('click',()=>{
+  rInput.value='0.2'; KInput.value='1000'; P0Input.value='50'; tmaxInput.value='50'; pointsInput.value='200';
+  updateChart();
+});
+exportBtn.addEventListener('click',()=>{
+  const r=parseFloat(rInput.value), K=parseFloat(KInput.value), P0=parseFloat(P0Input.value),
+        tmax=parseFloat(tmaxInput.value), nPoints=parseInt(pointsInput.value);
+  const tArr=linspace(0,tmax,nPoints);
+  const {P}=computeLogistic(r,K,P0,tArr);
+  let csv='Tiempo (t),Población (P)\n';
+  for(let i=0;i<tArr.length;i++) csv+=`${tArr[i]},${P[i]}\n`;
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='logistic_growth_data.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Render inicial
+window.addEventListener('load',updateChart);
+</script>
+</body>
+</html>
